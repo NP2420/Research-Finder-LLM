@@ -1,0 +1,29 @@
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: research-ollama
+    volumes:
+      - "/storage/docker/research-ollama:/root/.ollama"
+    ports:
+      - "11434:11434"
+    tty: true
+    stdin_open: true
+    restart: unless-stopped
+    entrypoint: /bin/sh -c "ollama serve & sleep 5 && ollama pull llama3.2 && wait"
+    deploy:
+      resources:
+        reservations:
+          devices: #only if nvidia toolkit
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+  python-client:
+    build: .
+    container_name: python-client
+    volumes:
+      - ./app.py:/src/app.py
+      - ./requirements.txt:/src/requirements.txt
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
