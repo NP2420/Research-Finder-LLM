@@ -7,7 +7,8 @@ from langchain.schema import Document
 from langchain_community.vectorstores import FAISS
 
 FILE = "./resources/jstor_metadata_2025-10-09.jsonl.gz"
-BATCH_SIZE = 50000
+BATCH_SIZE = 50000          # process in chunks of 50k. Adjust depending on setup
+SEGMENT_LIMIT = 5_000_000   # 5 million per big FAISS file to avoid memory issues. Adjust depending on setup.
 FAISS_PERSIST_DIR = "../resources/jstor"
 
 print("Initializing embeddings...")
@@ -17,77 +18,81 @@ embeddings = HuggingFaceEmbeddings(
 )
 print("Embeddings ready.")
 
-def stream_json_records(file_path, max_items=None):
-    """
-    Stream records from a .jsonl.gz file.
-    Each yielded record is a dict with searchable text and metadata.
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
 
+def stream_json_records(file_path):
     with gzip.open(file_path, "rt", encoding="utf-8") as f:
-        for i, line in enumerate(f, 1):
+        for line in f:
             data = json.loads(line)
-
-            # Combine title, abstract, and discipline names for embedding
-            disciplines = data.get('discipline_names') or []
-            disciplines = [str(d) for d in disciplines]
+            disciplines = [str(d) for d in (data.get('discipline_names') or [])]
             text = f"{data.get('title','')} {data.get('abstract','')} {' '.join(disciplines)}".strip()
-
             if text:
-                metadata = {
-                    "id": data.get("item_id"),
-                    "title": data.get("title", ""),
-                    "abstract": data.get("abstract", ""),
-                    "published_date": data.get("published_date"),
-                    "content_type": data.get("content_type"),
-                    "ithaka_doi": data.get("ithaka_doi"),
-                    "discipline_names": data.get("discipline_names", [])
-                }
-                yield {"text": text, "metadata": metadata}
+                yield Document(
+                    page_content=text,
+                    metadata={
+                        "id": data.get("item_id"),
+                        "title": data.get("title", ""),
+                        "abstract": data.get("abstract", ""),
+                        "published_date": data.get("published_date"),
+                        "content_type": data.get("content_type"),
+                        "ithaka_doi": data.get("ithaka_doi"),
+                        "discipline_names": data.get("discipline_names", [])
+                    }
+                )
 
-            if max_items and i >= max_items:
-                break
 
-def ingest_records(file_path, batch_size=BATCH_SIZE):
-    """
-    Ingest records into a single persistent FAISS vector store in batches.
-    """
+def ingest_records(file_path):
     print(f"Starting ingestion from {file_path}...")
+
     buffer = []
+    batch_docs = []
+    total_docs = 0
+    segment_num = 1
     batch_num = 1
     vectorstore = None
 
-    for i, record in enumerate(stream_json_records(file_path, 100), 1):
-        buffer.append(Document(page_content=record["text"], metadata=record["metadata"]))
+    for doc in stream_json_records(file_path):
+        buffer.append(doc)
+        total_docs += 1
 
-        if i % batch_size == 0:
-            print(f"Processing batch {batch_num}: ({i-batch_size+1}-{i})")
+        if len(buffer) >= BATCH_SIZE:
+            print(f"Processing batch {batch_num}: ({total_docs - len(buffer) + 1}-{total_docs})...")
             new_store = FAISS.from_documents(buffer, embeddings)
+            buffer = []
 
             if vectorstore is None:
                 vectorstore = new_store
             else:
                 vectorstore.merge_from(new_store)
 
-            buffer = []
             batch_num += 1
 
-    # Process remaining records
+        # Save segment if we hit 5 million documents
+        if total_docs % SEGMENT_LIMIT == 0:
+            segment_path = os.path.join(FAISS_PERSIST_DIR, f"segment_{segment_num}")
+            print(f"Saving segment {segment_num} ({total_docs:,} total docs) to {segment_path}")
+            os.makedirs(segment_path, exist_ok=True)
+            vectorstore.save_local(segment_path)
+            vectorstore = None
+            segment_num += 1
+            batch_num = 1  # reset batch counter
+
+    # Save final segment
     if buffer:
-        print(f"Processing final batch ({i - len(buffer) + 1}-{i})...")
+        print(f"Processing final {len(buffer)} docs...")
         new_store = FAISS.from_documents(buffer, embeddings)
         if vectorstore is None:
             vectorstore = new_store
         else:
             vectorstore.merge_from(new_store)
 
-    # Save merged vector store
     if vectorstore:
-        vectorstore.save_local(FAISS_PERSIST_DIR)
-        print(f"Ingestion complete. FAISS vector store saved at: {FAISS_PERSIST_DIR}")
-    else:
-        print("No records were ingested.")
+        segment_path = os.path.join(FAISS_PERSIST_DIR, f"segment_{segment_num}")
+        print(f"Saving final segment {segment_num} at {segment_path}")
+        os.makedirs(segment_path, exist_ok=True)
+        vectorstore.save_local(segment_path)
+
+    print("Ingestion complete.")
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
