@@ -21,7 +21,7 @@ services:
     build: .
     container_name: python-client
     volumes:
-      - ./app.py:/src/app.py
+      - ./ollama-app.py:/src/ollama-app.py
       - ./requirements.txt:/src/requirements.txt
     depends_on:
       - ollama

@@ -1,2 +1,4 @@
-/resources/tool.py
+/resources/
+/precomp/resources
 /precomp/venv/
+/ignore

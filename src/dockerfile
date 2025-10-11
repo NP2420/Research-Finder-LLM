@@ -2,12 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /src
 
-COPY ./requirements.txt ./app.py ./
+COPY ./requirements.txt ./ollama-app.py ./
 
 RUN apt-get update && apt-get install git -y && apt-get install curl -y
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# COPY . .
 
-CMD ["python", "app.py"]
+CMD ["python", "ollama-app.py"]
