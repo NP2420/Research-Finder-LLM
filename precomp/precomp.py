@@ -56,7 +56,7 @@ def stream_json_records(file_path, type="primary"):
                 title = data.get("title", "")
                 abstract = data.get("abstract", "")
                 
-                text = f"{title.strip()} {abstract.strip()}".strip()            
+                text = f"{title} {abstract}".strip()            
                 if not text:
                     continue
                 
@@ -121,5 +121,5 @@ def ingest_records(file_path, type="primary"):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    # ingest_records(FILE, "primary")
+    ingest_records(FILE, "primary")
     ingest_records(FILE, "secondary")
