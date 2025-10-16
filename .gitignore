@@ -1,4 +1,5 @@
 /resources/
 /precomp/resources/
 /precomp/venv/
+/precomp/out/
 /ignore
